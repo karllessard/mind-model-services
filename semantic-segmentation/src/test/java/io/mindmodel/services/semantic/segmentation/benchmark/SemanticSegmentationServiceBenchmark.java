@@ -46,7 +46,7 @@ public class SemanticSegmentationServiceBenchmark {
 
 			String MODEL_URI = "http://download.tensorflow.org/models/xception_65_coco_pretrained_2018_10_02.tar.gz#frozen_inference_graph.pb";
 			String MODEL_URI2 = "http://download.tensorflow.org/models/deeplabv3_mnv2_dm05_pascal_trainaug_2018_10_01.tar.gz#frozen_inference_graph.pb";
-			segmentationService = new SemanticSegmentationService(MODEL_URI, true);
+			segmentationService = new SemanticSegmentationService(MODEL_URI2, true);
 
 			inputImage = GraphicsUtils.loadAsByteArray("classpath:/images/VikiMaxiAdi.jpg");
 		}

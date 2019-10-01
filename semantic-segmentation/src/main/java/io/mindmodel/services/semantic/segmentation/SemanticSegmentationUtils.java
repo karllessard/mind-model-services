@@ -1,5 +1,10 @@
 package io.mindmodel.services.semantic.segmentation;
 
+import static java.awt.image.BufferedImage.TYPE_3BYTE_BGR;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.mindmodel.services.common.GraphicsUtils;
+import io.mindmodel.services.common.TensorFlowService;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Image;
@@ -8,23 +13,20 @@ import java.awt.image.DataBufferByte;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Map;
-
 import javax.imageio.ImageIO;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.mindmodel.services.common.GraphicsUtils;
-import io.mindmodel.services.common.TensorFlowService;
-import org.tensorflow.Tensor;
-import org.tensorflow.types.UInt8;
-
 import org.springframework.core.io.DefaultResourceLoader;
-
-import static java.awt.image.BufferedImage.TYPE_3BYTE_BGR;
+import org.tensorflow.EagerSession;
+import org.tensorflow.Tensor;
+import org.tensorflow.nio.nd.IntNdArray;
+import org.tensorflow.nio.nd.Shape;
+import org.tensorflow.op.Ops;
+import org.tensorflow.types.TInt32;
+import org.tensorflow.types.TInt64;
+import org.tensorflow.types.TUInt8;
 
 /**
  *
@@ -98,47 +100,51 @@ public class SemanticSegmentationUtils {
 		return background;
 	}
 
-	public static Tensor<UInt8> createInputTensor(BufferedImage scaledImage) {
+	public static Tensor<TUInt8> createInputTensor(Ops tf, BufferedImage scaledImage) {
 		if (scaledImage.getType() != TYPE_3BYTE_BGR) {
 			throw new IllegalArgumentException(
 					String.format("Expected 3-byte BGR encoding in BufferedImage, found %d", scaledImage.getType()));
 		}
 
-		// ImageIO.read produces BGR-encoded images, while the model expects RGB.
-		byte[] data = bgrToRgb(toBytes(scaledImage));
-
 		// Expand dimensions since the model expects images to have shape: [1, None, None, 3]
-		long[] shape = new long[] { BATCH_SIZE, scaledImage.getHeight(), scaledImage.getWidth(), CHANNELS };
+		Shape shape = Shape.make(BATCH_SIZE, scaledImage.getHeight(), scaledImage.getWidth(), CHANNELS);
 
-		return Tensor.create(UInt8.class, shape, ByteBuffer.wrap(data));
-	}
+		try (Tensor<TUInt8> tensor = TUInt8.tensorOfShape(shape)) {
+			tensor.data().write(toBytes(scaledImage));
 
-	private static byte[] bgrToRgb(byte[] brgImage) {
-		byte[] rgbImage = new byte[brgImage.length];
-		for (int i = 0; i < brgImage.length; i += 3) {
-			rgbImage[i] = brgImage[i + 2];
-			rgbImage[i + 1] = brgImage[i + 1];
-			rgbImage[i + 2] = brgImage[i];
+			// ImageIO.read produces BGR-encoded images, while the model expects RGB.
+			return tf.reverse(tf.constant(tensor), tf.constant(new int[]{3})).asOutput().tensor();
 		}
-		return rgbImage;
 	}
 
 	private static byte[] toBytes(BufferedImage bufferedImage) {
 		return ((DataBufferByte) bufferedImage.getRaster().getDataBuffer()).getData();
 	}
 
-	public static BufferedImage createMaskImage(int[][] maskPixels, int width, int height, double transparency) {
+	public static IntNdArray extractOutputData(Ops tf, Tensor<TInt64> outputTensor) {
+		return tf.dtypes.cast(
+				tf.linalg.transpose(
+						tf.squeeze(tf.constant(outputTensor)), // squeeze tensor to remove batch dimension of size 1
+						tf.constant(new int[] {1, 0})
+				),
+				TInt32.DTYPE
+		).asOutput().tensor().data(); // FIXME! that leaves potentially one tensor open for a long time...
+	}
 
-		maskPixels = rotate(maskPixels);
+	public static BufferedImage createMaskImage(IntNdArray mask, double transparency) {
+		return createMaskImage(mask, (int) mask.shape().size(1), (int) mask.shape().size(0), transparency);
+	}
 
-		int maskWidth = maskPixels.length;
-		int maskHeight = maskPixels[0].length;
+	public static BufferedImage createMaskImage(IntNdArray maskPixels, int width, int height, double transparency) {
+
+		int maskWidth = (int) maskPixels.shape().size(0);
+		int maskHeight = (int) maskPixels.shape().size(1);
 
 		int[] maskArray = new int[maskWidth * maskHeight];
 		int k = 0;
 		for (int i = 0; i < maskHeight; i++) {
 			for (int j = 0; j < maskWidth; j++) {
-				Color c = (maskPixels[j][i] == 0) ? Color.BLACK : GraphicsUtils.getClassColor(maskPixels[j][i]);
+				Color c = (maskPixels.get(j, i) == 0) ? Color.BLACK : GraphicsUtils.getClassColor(maskPixels.get(j, i));
 				int t = (int) (255 * (1 - transparency));
 				maskArray[k++] = new Color(c.getRed(), c.getGreen(), c.getBlue(), t).getRGB();
 			}
@@ -150,35 +156,6 @@ public class SemanticSegmentationUtils {
 
 		// Stretch the image to fit the target box width and height!
 		return GraphicsUtils.toBufferedImage(maskImage.getScaledInstance(width, height, Image.SCALE_SMOOTH));
-	}
-
-	/**
-	 * rotate clockwise in 90 degree
-	 * @param input The 2D matrix to be rotated
-	 * @return The input matrix rotated clockwise in 90 degrees
-	 */
-	private static int[][] rotate(int[][] input) {
-
-		int w = input.length;
-		int h = input[0].length;
-
-		int[][] output = new int[h][w];
-		for (int y = 0; y < h; y++) {
-			for (int x = w - 1; x >= 0; x--) {
-				output[y][x] = input[x][y];
-			}
-		}
-		return output;
-	}
-
-	public static int[][] toIntArray(long[][] longArray) {
-		int[][] intArray = new int[longArray.length][longArray[0].length];
-		for (int i = 0; i < longArray.length; i++) {
-			for (int j = 0; j < longArray[0].length; j++) {
-				intArray[i][j] = (int) longArray[i][j];
-			}
-		}
-		return intArray;
 	}
 
 	public String serializeToJson(int[][] pixels) {
@@ -238,32 +215,27 @@ public class SemanticSegmentationUtils {
 		//String imagePath = "classpath:/images/landsmeer.png";
 
 		// ADE20K
-		String tensorflowModelLocation = "file:/Users/ctzolov/Downloads/deeplabv3_xception_ade20k_train/frozen_inference_graph.pb";
-		String imagePath = "classpath:/images/interior.jpg";
+		//String tensorflowModelLocation = "file:/Users/ctzolov/Downloads/deeplabv3_xception_ade20k_train/frozen_inference_graph.pb";
+		String tensorflowModelLocation = "http://download.tensorflow.org/models/deeplabv3_mnv2_dm05_pascal_trainaug_2018_10_01.tar.gz#frozen_inference_graph.pb";
+		//String imagePath = "classpath:/images/interior.jpg";
+		String imagePath = "classpath:/images/VikiMaxiAdi.jpg";
 
 		BufferedImage inputImage = ImageIO.read(new DefaultResourceLoader().getResource(imagePath).getInputStream());
 
 		TensorFlowService tf = new TensorFlowService(new DefaultResourceLoader().getResource(tensorflowModelLocation), Arrays.asList(OUTPUT_TENSOR_NAME));
+		Ops ops = Ops.create(EagerSession.getDefault());
 
-		SemanticSegmentationUtils segmentationService = new SemanticSegmentationUtils();
+		BufferedImage scaledImage = scaledImage(inputImage);
 
-		BufferedImage scaledImage = segmentationService.scaledImage(inputImage);
-
-		Tensor<UInt8> inTensor = segmentationService.createInputTensor(scaledImage);
+		Tensor<TUInt8> inTensor = createInputTensor(ops, scaledImage);
 
 		Map<String, Tensor<?>> output = tf.apply(Collections.singletonMap(INPUT_TENSOR_NAME, inTensor));
 
-		Tensor<?> maskPixelsTensor = output.get(OUTPUT_TENSOR_NAME);
+		IntNdArray maskPixels = extractOutputData(ops, output.get(OUTPUT_TENSOR_NAME).expect(TInt64.DTYPE));
 
-		int height = (int) maskPixelsTensor.shape()[1];
-		int width = (int) maskPixelsTensor.shape()[2];
-		long[][] maskPixels = maskPixelsTensor.copyTo(new long[BATCH_SIZE][height][width])[0]; // take 0 because the batch size is 1.
+		BufferedImage maskImage = createMaskImage(maskPixels, scaledImage.getWidth(), scaledImage.getHeight(), 0.35);
 
-		int[][] maskPixelsInt = segmentationService.toIntArray(maskPixels);
-
-		BufferedImage maskImage = segmentationService.createMaskImage(maskPixelsInt, scaledImage.getWidth(), scaledImage.getHeight(), 0.35);
-
-		BufferedImage blended = segmentationService.blendMask(maskImage, scaledImage);
+		BufferedImage blended = blendMask(maskImage, scaledImage);
 
 		ImageIO.write(maskImage, "png", new File("./semantic-segmentation/target/java2Dmask.jpg"));
 		ImageIO.write(blended, "png", new File("./semantic-segmentation/target/java2Dblended.jpg"));

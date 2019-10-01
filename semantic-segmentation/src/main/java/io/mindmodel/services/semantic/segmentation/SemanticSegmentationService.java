@@ -22,6 +22,11 @@ import io.mindmodel.services.common.TensorFlowService;
 
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
+import org.tensorflow.Tensor;
+import org.tensorflow.nio.nd.IntNdArray;
+import org.tensorflow.nio.nd.LongNdArray;
+import org.tensorflow.types.TInt32;
+import org.tensorflow.types.TInt64;
 
 /**
  * @author Christian Tzolov
@@ -30,7 +35,7 @@ public class SemanticSegmentationService {
 
 	public static final String DEFAULT_MODEL_URI = "http://dl.bintray.com/big-data/generic/deeplabv3_mnv2_pascal_train_aug_frozen_inference_graph.pb";
 	private final SemanticSegmentationConfiguration segmentationConfiguration;
-	private final Function<byte[], long[][]> segmentationFunction;
+	private final Function<byte[], IntNdArray> segmentationFunction;
 
 	public SemanticSegmentationConfiguration getSegmentationConfiguration() {
 		return segmentationConfiguration;
@@ -53,7 +58,7 @@ public class SemanticSegmentationService {
 				.andThen(tensorFlowService).andThen(segmentationConfiguration.outputConverter());
 	}
 
-	public long[][] maskPixels(byte[] image) {
+	public IntNdArray maskPixels(byte[] image) {
 		return segmentationFunction.apply(image);
 	}
 

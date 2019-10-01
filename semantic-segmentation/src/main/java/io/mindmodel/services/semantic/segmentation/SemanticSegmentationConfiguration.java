@@ -25,8 +25,16 @@ import java.util.function.Function;
 import io.mindmodel.services.common.GraphicsUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.tensorflow.EagerSession;
 import org.tensorflow.Tensor;
-import org.tensorflow.types.UInt8;
+import org.tensorflow.nio.nd.IntNdArray;
+import org.tensorflow.nio.nd.LongNdArray;
+import org.tensorflow.nio.nd.NdArray;
+import org.tensorflow.nio.nd.Shape;
+import org.tensorflow.op.Ops;
+import org.tensorflow.types.TInt32;
+import org.tensorflow.types.TInt64;
+import org.tensorflow.types.TUInt8;
 
 /**
  *
@@ -36,12 +44,12 @@ public class SemanticSegmentationConfiguration {
 
 	private static final Log logger = LogFactory.getLog(SemanticSegmentationConfiguration.class);
 
-	private static final int BATCH_SIZE = 1;
-
 	/**
 	 * Blended mask transparency. Value is between 0.0 (0% transparency) and 1.0 (100% transparent).
 	 */
 	private double maskTransparency = 0.3;
+
+	private Ops tf = Ops.create(EagerSession.getDefault());
 
 	/**
 	 * Generated image format
@@ -71,7 +79,7 @@ public class SemanticSegmentationConfiguration {
 	public Function<byte[], Map<String, Tensor<?>>> inputConverter() {
 		return image -> {
 			BufferedImage scaledImage = SemanticSegmentationUtils.scaledImage(image);
-			Tensor<UInt8> inTensor = SemanticSegmentationUtils.createInputTensor(scaledImage);
+			Tensor<TUInt8> inTensor = SemanticSegmentationUtils.createInputTensor(tf, scaledImage);
 			return Collections.singletonMap(SemanticSegmentationUtils.INPUT_TENSOR_NAME, inTensor);
 		};
 	}
@@ -80,34 +88,27 @@ public class SemanticSegmentationConfiguration {
 	 * Converts output named tensors into pixel masks
 	 * @return
 	 */
-	public Function<Map<String, Tensor<?>>, long[][]> outputConverter() {
+	public Function<Map<String, Tensor<?>>, IntNdArray> outputConverter() {
 		return resultTensors -> {
-			Tensor<?> outputTensor = resultTensors.get(SemanticSegmentationUtils.OUTPUT_TENSOR_NAME);
-			int width = (int) outputTensor.shape()[1];
-			int height = (int) outputTensor.shape()[2];
-			long[][] maskPixels = outputTensor.copyTo(new long[BATCH_SIZE][width][height])[0];
-			return maskPixels;
+
+			try (Tensor<TInt64> masks =
+					resultTensors.get(SemanticSegmentationUtils.OUTPUT_TENSOR_NAME).expect(TInt64.DTYPE)) {
+
+				return SemanticSegmentationUtils.extractOutputData(tf, masks);
+			}
 		};
 	}
 
 	/**
-	 * Takes the input image (byte[]) and mask pixels (long[][]) and outputs the same image (byte[]) augmented
+	 * Takes the input image (byte[]) and mask pixels (long matrix) and outputs the same image (byte[]) augmented
 	 * with masks overlays.
 	 * @return Returns the input image augmented with masks's overlays
 	 */
-	public BiFunction<byte[], long[][], byte[]> imageAugmenter() {
+	public BiFunction<byte[], IntNdArray, byte[]> imageAugmenter() {
 		return (inputImage, mask) -> {
-			int[][] maskPixels = SemanticSegmentationUtils.toIntArray(mask);
-
 			try {
-				int height = maskPixels.length;
-				int width = maskPixels[0].length;
-
 				BufferedImage scaledImage = SemanticSegmentationUtils.scaledImage(inputImage);
-
-				BufferedImage maskImage = SemanticSegmentationUtils.createMaskImage(
-						maskPixels, width, height, this.getMaskTransparency());
-
+				BufferedImage maskImage = SemanticSegmentationUtils.createMaskImage(mask, this.getMaskTransparency());
 				BufferedImage blend = SemanticSegmentationUtils.blendMask(maskImage, scaledImage);
 
 				return GraphicsUtils.toImageByteArray(blend, this.getImageFormat());
@@ -123,15 +124,10 @@ public class SemanticSegmentationConfiguration {
 	 * Converts the pixels (long[][]) into mask image (byte[])
 	 * @return Image representing the mask pixels
 	 */
-	public Function<long[][], byte[]> pixelsToMaskImage() {
-		return maskPixels -> {
+	public Function<IntNdArray, byte[]> pixelsToMaskImage() {
+		return mask -> {
 			try {
-
-				int height = maskPixels.length;
-				int width = maskPixels[0].length;
-
-				BufferedImage maskImage = SemanticSegmentationUtils.createMaskImage(
-						SemanticSegmentationUtils.toIntArray(maskPixels), width, height, this.getMaskTransparency());
+				BufferedImage maskImage = SemanticSegmentationUtils.createMaskImage(mask, this.getMaskTransparency());
 
 				return GraphicsUtils.toImageByteArray(maskImage, this.getImageFormat());
 			}
