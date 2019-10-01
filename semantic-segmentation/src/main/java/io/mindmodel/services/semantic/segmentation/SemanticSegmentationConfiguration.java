@@ -49,8 +49,6 @@ public class SemanticSegmentationConfiguration {
 	 */
 	private double maskTransparency = 0.3;
 
-	private Ops tf = Ops.create(EagerSession.getDefault());
-
 	/**
 	 * Generated image format
 	 */
@@ -79,7 +77,7 @@ public class SemanticSegmentationConfiguration {
 	public Function<byte[], Map<String, Tensor<?>>> inputConverter() {
 		return image -> {
 			BufferedImage scaledImage = SemanticSegmentationUtils.scaledImage(image);
-			Tensor<TUInt8> inTensor = SemanticSegmentationUtils.createInputTensor(tf, scaledImage);
+			Tensor<TUInt8> inTensor = SemanticSegmentationUtils.createInputTensor(scaledImage);
 			return Collections.singletonMap(SemanticSegmentationUtils.INPUT_TENSOR_NAME, inTensor);
 		};
 	}
@@ -94,7 +92,7 @@ public class SemanticSegmentationConfiguration {
 			try (Tensor<TInt64> masks =
 					resultTensors.get(SemanticSegmentationUtils.OUTPUT_TENSOR_NAME).expect(TInt64.DTYPE)) {
 
-				return SemanticSegmentationUtils.extractOutputData(tf, masks);
+				return SemanticSegmentationUtils.extractOutputData(masks);
 			}
 		};
 	}

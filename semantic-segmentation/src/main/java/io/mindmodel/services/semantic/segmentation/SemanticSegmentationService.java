@@ -22,6 +22,7 @@ import io.mindmodel.services.common.TensorFlowService;
 
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
+import org.tensorflow.EagerSession;
 import org.tensorflow.Tensor;
 import org.tensorflow.nio.nd.IntNdArray;
 import org.tensorflow.nio.nd.LongNdArray;
@@ -55,7 +56,8 @@ public class SemanticSegmentationService {
 			TensorFlowService tensorFlowService) {
 		this.segmentationConfiguration = segmentationConfiguration;
 		this.segmentationFunction = segmentationConfiguration.inputConverter()
-				.andThen(tensorFlowService).andThen(segmentationConfiguration.outputConverter());
+				.andThen(tensorFlowService)
+				.andThen(segmentationConfiguration.outputConverter());
 	}
 
 	public IntNdArray maskPixels(byte[] image) {

@@ -56,6 +56,8 @@ public class SemanticSegmentationUtils {
 	private static final long CHANNELS = 3;
 	private static final int REQUIRED_INPUT_IMAGE_SIZE = 513;
 
+	private static final Ops tf = Ops.create();
+
 	public static BufferedImage scaledImage(String imagePath) {
 		try {
 			return scaledImage(ImageIO.read(new DefaultResourceLoader().getResource(imagePath).getInputStream()));
@@ -100,7 +102,7 @@ public class SemanticSegmentationUtils {
 		return background;
 	}
 
-	public static Tensor<TUInt8> createInputTensor(Ops tf, BufferedImage scaledImage) {
+	public static Tensor<TUInt8> createInputTensor(BufferedImage scaledImage) {
 		if (scaledImage.getType() != TYPE_3BYTE_BGR) {
 			throw new IllegalArgumentException(
 					String.format("Expected 3-byte BGR encoding in BufferedImage, found %d", scaledImage.getType()));
@@ -121,7 +123,7 @@ public class SemanticSegmentationUtils {
 		return ((DataBufferByte) bufferedImage.getRaster().getDataBuffer()).getData();
 	}
 
-	public static IntNdArray extractOutputData(Ops tf, Tensor<TInt64> outputTensor) {
+	public static IntNdArray extractOutputData(Tensor<TInt64> outputTensor) {
 		return tf.dtypes.cast(
 				tf.linalg.transpose(
 						tf.squeeze(tf.constant(outputTensor)), // squeeze tensor to remove batch dimension of size 1
@@ -217,8 +219,7 @@ public class SemanticSegmentationUtils {
 		// ADE20K
 		//String tensorflowModelLocation = "file:/Users/ctzolov/Downloads/deeplabv3_xception_ade20k_train/frozen_inference_graph.pb";
 		String tensorflowModelLocation = "http://download.tensorflow.org/models/deeplabv3_mnv2_dm05_pascal_trainaug_2018_10_01.tar.gz#frozen_inference_graph.pb";
-		//String imagePath = "classpath:/images/interior.jpg";
-		String imagePath = "classpath:/images/VikiMaxiAdi.jpg";
+		String imagePath = "classpath:/images/interior.jpg";
 
 		BufferedImage inputImage = ImageIO.read(new DefaultResourceLoader().getResource(imagePath).getInputStream());
 
@@ -227,11 +228,11 @@ public class SemanticSegmentationUtils {
 
 		BufferedImage scaledImage = scaledImage(inputImage);
 
-		Tensor<TUInt8> inTensor = createInputTensor(ops, scaledImage);
+		Tensor<TUInt8> inTensor = createInputTensor(scaledImage);
 
 		Map<String, Tensor<?>> output = tf.apply(Collections.singletonMap(INPUT_TENSOR_NAME, inTensor));
 
-		IntNdArray maskPixels = extractOutputData(ops, output.get(OUTPUT_TENSOR_NAME).expect(TInt64.DTYPE));
+		IntNdArray maskPixels = extractOutputData(output.get(OUTPUT_TENSOR_NAME).expect(TInt64.DTYPE));
 
 		BufferedImage maskImage = createMaskImage(maskPixels, scaledImage.getWidth(), scaledImage.getHeight(), 0.35);
 
